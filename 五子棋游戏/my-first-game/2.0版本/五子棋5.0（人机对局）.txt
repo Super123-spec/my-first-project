@@ -1,0 +1,576 @@
+#define _CRT_SECURE_NO_WARNINGS
+#include <stdio.h>
+#include <graphics.h>
+#include <windows.h>
+#include <mmsystem.h>
+#include <time.h>
+#include <math.h>
+#pragma comment(lib, "winmm.lib")
+
+// 全局定义背景图片对象
+IMAGE bgImg;
+
+// 函数声明
+void startInterface();
+void csh();
+void game();
+int judge(int mapx, int mapy);
+void undoMove();
+void resetGame();
+int aiMove(int* x, int* y);
+
+// 用于记录当前的轮数
+int f = 0;
+// 二维数组，用于记录棋盘上每个位置的棋子状态
+int c[21][21] = { 0 };
+// 存储每一步落子的信息
+int moveHistory[441][2];
+// 记录当前的步数
+int moveCount = 0;
+// 记录玩家 1 的胜场数
+int player1Wins = 0;
+// 记录玩家 2 的胜场数
+int player2Wins = 0;
+
+// 新增：游戏模式 (0:双人对战, 1:人机对战)
+int gameMode = 0;
+
+// 开始界面函数（修改版）
+void startInterface() {
+    // 初始化图形窗口，大小为 600x400 像素
+    initgraph(600, 400);
+    // 加载背景图片
+    IMAGE startBg;
+    loadimage(&startBg, "123.png");
+    putimage(0, 0, &startBg);
+    // 设置文字背景模式为透明
+    setbkmode(TRANSPARENT);
+    // 设置文字颜色为白色
+
+    // 绘制标题
+    rectangle(200, 50, 400, 100);
+    outtextxy(220, 60, "Y T of 五子棋");
+
+    // 绘制游戏模式选择按钮
+    rectangle(200, 150, 400, 200);
+    outtextxy(220, 160, "双人对战");
+    rectangle(200, 250, 400, 300);
+    outtextxy(220, 260, "人机对战");
+
+    // 绘制退出按钮
+    rectangle(200, 350, 400, 400);
+    outtextxy(220, 360, "退出游戏");
+
+    // 定义鼠标消息结构体
+    MOUSEMSG msg;
+    while (1) {
+        msg = GetMouseMsg();
+        if (msg.uMsg == WM_LBUTTONDOWN) {
+            // 处理双人对战按钮
+            if (msg.x >= 200 && msg.x <= 400 && msg.y >= 150 && msg.y <= 200) {
+                gameMode = 0;
+                closegraph();
+                return;
+            }
+            // 处理人机对战按钮
+            if (msg.x >= 200 && msg.x <= 400 && msg.y >= 250 && msg.y <= 300) {
+                gameMode = 1;
+                closegraph();
+                return;
+            }
+            // 处理退出按钮
+            if (msg.x >= 200 && msg.x <= 400 && msg.y >= 350 && msg.y <= 400) {
+                closegraph();
+                exit(0);
+            }
+        }
+    }
+}
+
+// 判断胜负的函数（修复版）
+int judge(int mapx, int mapy) {
+    // 直接使用当前位置的棋子颜色
+    int currentPlayer = c[mapx][mapy];
+    if (currentPlayer == 0) return 0; // 空位置
+
+    // 横向检查
+    for (int i = mapx - 4; i <= mapx; i++) {
+        if (i >= 0 && i + 4 < 21 &&
+            c[i][mapy] == currentPlayer &&
+            c[i + 1][mapy] == currentPlayer &&
+            c[i + 2][mapy] == currentPlayer &&
+            c[i + 3][mapy] == currentPlayer &&
+            c[i + 4][mapy] == currentPlayer)
+            return 1;
+    }
+
+    // 纵向检查
+    for (int j = mapy - 4; j <= mapy; j++) {
+        if (j >= 0 && j + 4 < 21 &&
+            c[mapx][j] == currentPlayer &&
+            c[mapx][j + 1] == currentPlayer &&
+            c[mapx][j + 2] == currentPlayer &&
+            c[mapx][j + 3] == currentPlayer &&
+            c[mapx][j + 4] == currentPlayer)
+            return 1;
+    }
+
+    // 正斜检查（左上到右下）
+    for (int i = mapx - 4, j = mapy - 4; i <= mapx; i++, j++) {
+        if (i >= 0 && i + 4 < 21 && j >= 0 && j + 4 < 21 &&
+            c[i][j] == currentPlayer &&
+            c[i + 1][j + 1] == currentPlayer &&
+            c[i + 2][j + 2] == currentPlayer &&
+            c[i + 3][j + 3] == currentPlayer &&
+            c[i + 4][j + 4] == currentPlayer)
+            return 1;
+    }
+
+    // 反斜检查（右上到左下）
+    for (int i = mapx - 4, j = mapy + 4; i <= mapx; i++, j--) {
+        if (i >= 0 && i + 4 < 21 && j - 4 >= 0 && j < 21 &&
+            c[i][j] == currentPlayer &&
+            c[i + 1][j - 1] == currentPlayer &&
+            c[i + 2][j - 2] == currentPlayer &&
+            c[i + 3][j - 3] == currentPlayer &&
+            c[i + 4][j - 4] == currentPlayer)
+            return 1;
+    }
+
+    return 0;
+}
+
+// 悔棋函数 - 支持人机对战模式
+void undoMove() {
+    // 人机对战模式：需要撤销两步（玩家和AI各一步）
+    int stepsToUndo = (gameMode == 1) ? 2 : 1;
+
+    for (int s = 0; s < stepsToUndo; s++) {
+        if (moveCount > 0) {
+            // 获取上一步的落子位置
+            int lastX = moveHistory[moveCount - 1][0];
+            int lastY = moveHistory[moveCount - 1][1];
+
+            // 将该位置的棋子状态置为 0
+            c[lastX][lastY] = 0;
+
+            // 步数减 1
+            moveCount--;
+            // 轮数减 1
+            f--;
+
+            // 恢复背景图片
+            int x = lastY * 25;
+            int y = lastX * 25;
+            putimage(x - 12, y - 12, 24, 24, &bgImg, x - 12, y - 12);
+
+            // 重新绘制网格线
+            setlinecolor(BLACK);
+            setlinestyle(PS_SOLID, 1);
+            // 横线
+            line(0, y, 500, y);
+            // 竖线
+            line(x, 0, x, 500);
+
+            // 如果位于边界，重新绘制边框
+            if (lastX == 0 || lastX == 20 || lastY == 0 || lastY == 20) {
+                setlinestyle(PS_SOLID, 5);
+                rectangle(0, 0, 500, 500);
+            }
+        }
+    }
+}
+
+// 重置游戏状态函数
+void resetGame() {
+    // 重置棋盘状态
+    for (int i = 0; i < 21; i++) {
+        for (int j = 0; j < 21; j++) {
+            c[i][j] = 0;
+        }
+    }
+    // 重置轮数
+    f = 0;
+    // 重置步数
+    moveCount = 0;
+
+    // 重新绘制整个界面
+    putimage(0, 0, &bgImg);
+
+    // 绘制棋盘网格
+    setlinestyle(PS_SOLID, 1);
+    setlinecolor(BLACK);
+    for (int i = 0; i < 21; i++) {
+        line(0, i * 25, 500, i * 25);
+        line(i * 25, 0, i * 25, 500);
+    }
+
+    // 边框仍用5像素
+    setlinestyle(PS_SOLID, 5);
+    rectangle(0, 0, 500, 500);
+
+    // 绘制界面文字
+    setbkmode(0);
+    settextcolor(BLACK);
+    outtextxy(600, 60, "玩家1：黑棋");
+    if (gameMode == 1) {
+        outtextxy(600, 120, "电脑：白棋");
+    }
+    else {
+        outtextxy(600, 120, "玩家2：白棋");
+    }
+    char winsText[50];
+    sprintf(winsText, "玩家1胜场: %d", player1Wins);
+    outtextxy(600, 180, winsText);
+    sprintf(winsText, "玩家2胜场: %d", player2Wins);
+    outtextxy(600, 210, winsText);
+    outtextxy(600, 240, "Super Y 制作");
+    outtextxy(600, 300, "点击下方按钮悔棋");
+    rectangle(600, 320, 800, 370);
+    outtextxy(620, 330, "悔棋");
+}
+
+// 游戏初始化函数
+void csh() {
+    // 初始化图形窗口
+    initgraph(976, 536);
+    // 加载背景图片到对象
+    loadimage(&bgImg, "123.png");
+    // 显示背景
+    putimage(0, 0, &bgImg);
+
+    // 设置线条颜色
+    setlinecolor(BLACK);
+    // 绘制棋盘网格线
+    for (int i = 0; i < 21; i++) {
+        line(0, i * 25, 500, i * 25);
+        line(i * 25, 0, i * 25, 500);
+    }
+    // 设置线条样式为实心，线宽为 5 像素
+    setlinestyle(PS_SOLID, 5);
+    // 绘制棋盘的外边框
+    rectangle(0, 0, 500, 500);
+    // 设置文字背景模式为透明
+    setbkmode(0);
+    // 设置文字颜色为黑色
+    settextcolor(BLACK);
+    // 输出玩家信息
+    outtextxy(600, 60, "玩家1：黑棋");
+    if (gameMode == 1) {
+        outtextxy(600, 120, "电脑：白棋");
+    }
+    else {
+        outtextxy(600, 120, "玩家2：白棋");
+    }
+    // 输出玩家胜负记录
+    char winsText[50];
+    sprintf(winsText, "玩家1胜场: %d", player1Wins);
+    outtextxy(600, 180, winsText);
+    sprintf(winsText, "玩家2胜场: %d", player2Wins);
+    outtextxy(600, 210, winsText);
+    outtextxy(600, 240, "Super Y 制作");
+    // 绘制悔棋提示
+    outtextxy(600, 300, "点击下方按钮悔棋");
+    rectangle(600, 320, 800, 370);
+    outtextxy(620, 330, "悔棋");
+}
+
+// 评估棋盘位置得分的函数
+int evaluatePosition(int x, int y, int player) {
+    if (c[x][y] != 0) return -1000000; // 位置已被占用
+
+    int score = 0;
+    int directions[4][2] = { {1,0}, {0,1}, {1,1}, {1,-1} }; // 四个方向：水平、垂直、对角线
+
+    for (int d = 0; d < 4; d++) {
+        int dx = directions[d][0];
+        int dy = directions[d][1];
+
+        // 计算在这个方向上的连续棋子
+        int playerCount = 0;
+        int opponentCount = 0;
+        int emptyCount = 0;
+
+        // 检查5个位置
+        for (int i = -4; i <= 4; i++) {
+            if (i == 0) continue; // 跳过当前位置
+
+            int nx = x + i * dx;
+            int ny = y + i * dy;
+
+            // 边界检查
+            if (nx < 0 || nx >= 21 || ny < 0 || ny >= 21) continue;
+
+            if (c[nx][ny] == player) {
+                playerCount++;
+            }
+            else if (c[nx][ny] == 0) {
+                emptyCount++;
+            }
+            else {
+                opponentCount++;
+            }
+        }
+
+        // 根据连续棋子和空格数量评分
+        if (playerCount == 4) score += 10000; // 四连
+        else if (playerCount == 3 && emptyCount >= 1) score += 1000; // 三连
+        else if (playerCount == 2 && emptyCount >= 2) score += 100; // 二连
+
+        // 防守：阻止对手形成四连
+        if (opponentCount == 4) score += 5000;
+        else if (opponentCount == 3) score += 500;
+    }
+
+    // 中心位置加分
+    int centerDist = abs(x - 10) + abs(y - 10);
+    score += (20 - centerDist) * 10;
+
+    return score;
+}
+
+// AI自动下棋函数
+int aiMove(int* x, int* y) {
+    int bestScore = -10000000;
+    int bestX = -1, bestY = -1;
+
+    // 遍历棋盘上所有位置
+    for (int i = 1; i < 20; i++) {
+        for (int j = 1; j < 20; j++) {
+            // 只考虑空位
+            if (c[i][j] == 0) {
+                // 评估进攻得分（AI是白棋）
+                int attackScore = evaluatePosition(i, j, 2);
+                // 评估防守得分（防止玩家形成五连）
+                int defendScore = evaluatePosition(i, j, 1);
+
+                // 综合得分
+                int totalScore = attackScore + defendScore;
+
+                // 添加随机元素使AI行为更自然
+                totalScore += rand() % 50;
+
+                // 更新最佳位置
+                if (totalScore > bestScore) {
+                    bestScore = totalScore;
+                    bestX = i;
+                    bestY = j;
+                }
+            }
+        }
+    }
+
+    // 如果没有找到有效位置，随机选择
+    if (bestX == -1 || bestY == -1) {
+        do {
+            bestX = rand() % 19 + 1;
+            bestY = rand() % 19 + 1;
+        } while (c[bestX][bestY] != 0);
+    }
+
+    *x = bestX;
+    *y = bestY;
+    return 1;
+}
+
+// 游戏主循环函数（增强版） - 修复悔棋功能
+void game() {
+    int cx = 0, cy = 0; // 像素坐标
+    int mapx = 0, mapy = 0; // 棋盘坐标
+    MOUSEMSG msg;
+    HWND h = GetHWnd(); // 窗口句柄
+
+    // 初始化随机数种子
+    srand((unsigned int)time(NULL));
+
+    // 如果是人机对战且电脑先手，让AI先下
+    if (gameMode == 1 && f % 2 == 1) {
+        if (aiMove(&mapx, &mapy)) {
+            cx = mapy * 25;
+            cy = mapx * 25;
+
+            // 记录落子位置
+            moveHistory[moveCount][0] = mapx;
+            moveHistory[moveCount][1] = mapy;
+
+            // AI下白棋
+            setfillcolor(WHITE);
+            solidcircle(cx, cy, 10);
+            c[mapx][mapy] = 2;
+
+            moveCount++;
+            f++;
+
+            // 判断AI是否获胜
+            if (judge(mapx, mapy)) {
+                MessageBox(h, "电脑胜利", "gameover", MB_OK);
+                player2Wins++;
+
+                // 询问是否继续
+                int result = MessageBox(h, "是否继续游戏？", "提示", MB_YESNO);
+                if (result == IDYES) {
+                    resetGame();
+                }
+                else {
+                    closegraph();
+                    exit(0);
+                }
+            }
+
+            // 延时，让玩家看到AI落子
+            Sleep(500);
+        }
+    }
+
+    while (1) {
+        // 如果是人机模式且轮到AI
+        if (gameMode == 1 && f % 2 == 1) {
+            if (aiMove(&mapx, &mapy)) {
+                cx = mapy * 25;
+                cy = mapx * 25;
+
+                // 记录落子位置
+                moveHistory[moveCount][0] = mapx;
+                moveHistory[moveCount][1] = mapy;
+
+                // AI下白棋
+                setfillcolor(WHITE);
+                solidcircle(cx, cy, 10);
+                c[mapx][mapy] = 2;
+
+                moveCount++;
+                f++;
+
+                // 判断AI是否获胜
+                if (judge(mapx, mapy)) {
+                    MessageBox(h, "电脑胜利", "gameover", MB_OK);
+                    player2Wins++;
+
+                    // 询问是否继续
+                    int result = MessageBox(h, "是否继续游戏？", "提示", MB_YESNO);
+                    if (result == IDYES) {
+                        resetGame();
+                    }
+                    else {
+                        closegraph();
+                        exit(0);
+                    }
+                }
+
+                // 延时，让玩家看到AI落子
+                Sleep(500);
+            }
+            continue;
+        }
+
+        msg = GetMouseMsg();
+
+        // 检查悔棋按钮
+        if (msg.uMsg == WM_LBUTTONDOWN) {
+            if (msg.x >= 600 && msg.x <= 800 && msg.y >= 320 && msg.y <= 370) {
+                // 调用悔棋函数
+                undoMove();
+                continue;
+            }
+        }
+
+        // 重置坐标
+        mapx = -1;
+        mapy = -1;
+
+        // 遍历棋盘交叉点
+        for (int i = 0; i < 21; i++) {
+            for (int j = 0; j < 21; j++) {
+                if (abs(msg.x - j * 25) < 10 && abs(msg.y - i * 25) < 10) {
+                    cx = j * 25;
+                    cy = i * 25;
+                    mapx = i;
+                    mapy = j;
+                    break; // 找到最近交叉点后跳出内层循环
+                }
+            }
+            if (mapx != -1) break; // 已找到交叉点，跳出外层循环
+        }
+
+        // 处理落子
+        if (msg.uMsg == WM_LBUTTONDOWN && mapx != -1) {
+            // 边界检查
+            if (mapx == 0 || mapx == 20 || mapy == 0 || mapy == 20) {
+                MessageBox(h, "边界线不能下棋！", "五子棋", MB_OK);
+                continue;
+            }
+            // 位置是否已有棋子
+            if (c[mapx][mapy] != 0) {
+                MessageBox(h, "这里有棋子！", "五子棋", MB_OK);
+                continue;
+            }
+
+            // 记录落子位置
+            moveHistory[moveCount][0] = mapx;
+            moveHistory[moveCount][1] = mapy;
+
+            // 根据轮数决定棋子颜色
+            if (f % 2 == 0) {
+                setfillcolor(BLACK);
+                solidcircle(cx, cy, 10);
+                c[mapx][mapy] = 1;
+            }
+            else {
+                setfillcolor(WHITE);
+                solidcircle(cx, cy, 10);
+                c[mapx][mapy] = 2;
+            }
+
+            // 判断胜负
+            if (judge(mapx, mapy)) {
+                if (f % 2 == 0) { // 黑棋胜利
+                    MessageBox(h, "玩家1：黑棋胜利", "gameover", MB_OK);
+                    player1Wins++;
+                }
+                else { // 白棋胜利
+                    if (gameMode == 1) {
+                        MessageBox(h, "电脑胜利", "gameover", MB_OK);
+                    }
+                    else {
+                        MessageBox(h, "玩家2：白棋胜利", "gameover", MB_OK);
+                    }
+                    player2Wins++;
+                }
+
+                // 询问是否继续
+                int result = MessageBox(h, "是否继续游戏？", "提示", MB_YESNO);
+                if (result == IDYES) {
+                    resetGame();
+                }
+                else {
+                    closegraph();
+                    exit(0);
+                }
+            }
+
+            // 增加步数和轮数
+            moveCount++;
+            f++;
+        }
+    }
+}
+
+// 主函数
+int main() {
+    // 播放背景音乐
+    mciSendString("open music.mp3 alias bgm", NULL, 0, NULL);
+    mciSendString("play bgm repeat", NULL, 0, NULL);
+
+    // 显示开始界面
+    startInterface();
+    // 初始化游戏界面
+    csh();
+    // 进入游戏循环
+    game();
+
+    // 停止音乐并关闭图形窗口
+    mciSendString("stop bgm", NULL, 0, NULL);
+    mciSendString("close bgm", NULL, 0, NULL);
+    closegraph();
+    return 0;
+}
